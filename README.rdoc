@@ -1,0 +1,217 @@
+= Atomic Saves
+
+A common design pattern is to have a form that handles multiple models, in any of the following configurations:
+
+* has_many
+* has_many :through
+* has_and_belongs_to_many
+* has_one
+
+These multi-model forms require a complex interaction between Javascript, models, views and controllers.  Due to the complexity and the variety of scenarios one plugin can never totally abstract this process.  This plugin serves to help keep your models dry in a few of the most common scenarios.
+
+== Installation
+
+  script/plugin install git://github.com/zilkey/atomic_saves.git
+
+== Common Scenarios
+
+Some of the most common scenarios I've come across are:
+
+* A parent form with multiple child forms that get added to or removed from the screen via javascript (adding tasks to a todo list)
+* A list of checkboxes to choose from that control a habtm or hmt association (checking off permissions for a user)
+* A text box of comma or space-separated values that gets parsed (typing in tags, some of which may exist already)
+
+If you remove a child record and save, and the save fails because of validation, and you cancel, the data should be left unchanged.
+
+= Requirements Overview
+
+A form that manages a model and its related model must:
+
+* Handle validation of the main model as well as all of the associated models
+* Create fully valid XHTML
+* Have completely atomic saves:
+  * If you add a child item and there is a form error the child item needs to be redisplayed to the user, but not saved to the database
+  * If you update a child item and there is an error the child item must be correctly displayed to the user but not saved in the database
+  * If you remove a child item and there is a form error, the child must be hidden from view on the page but remain in the database
+  * On a successful save all new objects must be created, existing objects updated and removed object deleted
+* Run updates in a transaction
+* Handle both means of data entry:
+  * As subforms that can be added
+  * As a list of checkboxes that can be checked
+* Handle all of the rails helpers such as check boxes, date fields and radio buttons
+* Work the same every time a user clicks refresh or submits
+
+As far as the form goes, it needs to handle:
+
+* has_many
+* has_many :through via a list of checkboxes
+* has_many :through via params
+* has_and_belongs_to_many via a list of checkboxes
+* has_and_belongs_to_many via params
+* has_one
+* belongs_to (creating the parent first)
+
+So far the plugin only manages:
+
+* has_many
+* has_many :through via a list of checkboxes
+* has_and_belongs_to_many via a list of checkboxes
+* has_one
+
+= Usage
+
+Let's say that Project is the main object here, and is defined as:
+
+  class Project < ActiveRecord::Base
+    has_many :tasks, :single_save => true
+    has_many :assignments, :single_save => true
+    has_many :employees, :through => :assignments
+    has_many :categorizations
+    has_many :categories, :through => :categorizations, :single_save => true
+
+    validates_presence_of :name
+    validates_associated :tasks, :assignments
+  end
+
+Task belongs to Project and requires a name:
+
+  class Task < ActiveRecord::Base
+    belongs_to :project
+    validates_presence_of :name
+  end
+
+Employee is joined to Project through an Assignment and requires both an employee and a title:
+
+  class Employee < ActiveRecord::Base
+    has_many :assignments
+    has_many :projects, :through => :assignments
+  end
+
+  class Assignment < ActiveRecord::Base
+    belongs_to :project
+    belongs_to :employee
+    validates_presence_of :title
+    validates_presence_of :employee_id
+  end
+
+The project-employee-assignment part of the domain requires additional fields on the join table.
+
+Category is joined to Project through a Categorization:
+
+  class Category < ActiveRecord::Base
+    has_many :categorizations
+    has_many :projects, :through => :categorizations
+    validates_presence_of :name
+  end
+
+  class Categorization < ActiveRecord::Base
+    belongs_to :project
+    belongs_to :category
+  end
+
+The project-categorization-category part of the domain is very similar to a has_and_belongs_to_many relationship.
+Handling validation
+
+Instead of using the rails default error_messages_for helper, just use a partial.
+
+== Creating fully valid XHMTL
+
+To output valid XHTML you must:
+
+    * Set an index on every child field
+    * Have the javascript that dynamically adds fields set the index correctly as well
+
+This requires a complex interaction between the partial and the javascript code. The necessary parts are spread across multiple files:
+
+public/javascripts/application.js contains a generic class that you can use for any subform, and add multiple subforms to a page:
+
+  var Subform = Class.create({
+    lineIndex: 1,
+    parentElement: "",
+
+    // rawHTML contains the html to add using the "add" link
+    // lineIndex should be the length of the original array
+    // parentElement is the id of the div that the subforms attach to
+    initialize: function(rawHTML, lineIndex, parentElement) {
+      this.rawHTML        = rawHTML;
+      this.lineIndex      = lineIndex;
+      this.parentElement  = parentElement;
+    },
+
+    // parses the rawHTML and replaces all instances of the word
+    // INDEX with the line index
+    // So the HTML on that rails outputs will be INDEX, but when this
+    // is added to the dom it has the correct id
+    parsedHTML: function() {
+      return this.rawHTML.replace(/INDEX/g, this.lineIndex++);
+    },
+
+    // handles the inserting of the child form
+    add: function() {
+      new Insertion.Bottom($(this.parentElement), this.parsedHTML());
+    }
+  });
+          
+Each child form's partial must instantiate the javascript - I use a content_for block and inject that code into the head of the document
+
+  <%- content_for :head do -%>
+    <script type="text/javascript" charset="utf-8">
+     //<![CDATA[
+       taskForm = new Subform('<%= escape_javascript(render(:partial => "task", :object => Task.new, :locals => {:index => "INDEX"})) %>',<%= @project.tasks.length %>,'tasks');
+       assignmentForm = new Subform('<%= escape_javascript(render(:partial => "assignment", :object => Assignment.new, :locals => {:index => "INDEX"})) %>',<%= @project.assignments.length %>,'assignments');
+     //]]>
+    </script>
+  <%- end -%>
+          
+If you are using content_for like I am, then the app/views/application.html.erb file must have a corresponding yield statement
+
+Rails makes setting the index properly a breeze with it's :index option and the partial_counter local variable in partials that are fed collections.
+
+The index does not work with radio buttons (this may be fixed in edge) and the standard rails labels output invalid XHTML, so those have to be coded manually.
+Marking objects for deletion
+
+This means being able to mark an object for deletion before actually deleting it. I've accomplished this in a site-wide way with config/initializers/marked_for_deletion.rb
+Performing the save in a transaction
+
+Rails doesn't include the after_update callbacks in it's default transactions, so you have to do that yourself. It has 3 parts:
+
+== Create Associations From Params
+
+This adds methods when you create an association:
+
+  class Page < ActiveRecord::Base
+    has_many :meta_tags
+  end
+
+  page = Page.new
+  page.new_meta_tag_attributes = {"1" => {:name => "name"}} # => 1 is an arbitrary index, can be anything
+  page.existing_meta_tag_attributes = {"1" => {:name => "name"}} # => 1 is the actual id of the attribute
+
+== Mark For Deletion
+
+Adds an attribute named marked_for_deletion to your ActiveRecord models. 
+
+If you already have a field by that name, it will write to it.  If you don't, it will be a non-persisted attribute.
+
+I created this plugin with excellent RSpec Plugin Generator: http://github.com/pat-maddox/rspec-plugin-generator/tree/master
+
+== Example
+
+The following will all correctly set marked_for_deletion to true
+
+  page = Page.new
+  page.marked_for_deletion = true
+  page.marked_for_deletion = "true"
+  page.marked_for_deletion = 1
+  page.marked_for_deletion = "1"
+
+The following will set marked_for_deletion to false
+
+  page = Page.new
+  page.marked_for_deletion
+  page.marked_for_deletion = false
+  page.marked_for_deletion = "false"
+  page.marked_for_deletion = "any string"
+  page.marked_for_deletion = 2
+
+Copyright (c) 2008 Jeff Dean, released under the MIT license
