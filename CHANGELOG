@@ -1,0 +1,4 @@
+2008-05-14
+  Added changelog
+  Enabled advanced validation - it only validates those models that are not marked for deletion
+  Fixed after save to only save those that are not marked for deletion

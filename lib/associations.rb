@@ -1,3 +1,12 @@
+# Here are a few scenarios:
+#   adds 2 child records and clicks save
+#   both are invalid
+#   message appears
+#   removes one
+#   clicks save
+#   only one message should appear
+#   on save only one should be saved to the database
+# 
 module AssociationCreationFromParams
   def self.included(base)
     base.send :include, InstanceMethods
@@ -53,17 +62,7 @@ module AssociationCreationFromParams
               end
             end
           end
-
-          name = options[:through]
-          define_method("save_#{name.to_s}") do
-            send(name).each do |child|
-              child.save! # => so it cancels any transactions that might be in place
-            end
-          end
-          after_update "save_#{name.to_s}"
-
         else
-
           define_method("new_#{Inflector.singularize(association_id.to_s)}_attributes=") do |new_attributes|
             new_attributes.each do |id,attributes|
               send(association_id).build(attributes)
@@ -84,17 +83,31 @@ module AssociationCreationFromParams
           define_method("#{association_id}_without_deleted") do
             send(association_id).select{|t| t.marked_for_deletion == false}
           end
+        end
 
-          name = association_id
-          define_method("save_#{name.to_s}") do
-            send(name).each do |child|
-              child.save! # => so it cancels any transactions that might be in place
+        name = options[:through] || association_id
+        validation_method_for_association = "validate_#{name}"
+        define_method validation_method_for_association do
+          send("#{name}_without_deleted").each do |child|
+            errors.add name, "is invalid" unless child.valid?
+          end
+        end
+        validate validation_method_for_association
+
+        save_method_for_association = "save_#{name}"
+        define_method(save_method_for_association) do
+          send(name).each do |child|
+            if child.marked_for_deletion == false
+              child.save!
+            else
+              child.destroy unless child.new_record?
             end
           end
-          after_update "save_#{name.to_s}"
-
         end
+        after_update save_method_for_association
+
       end
+            
       has_many_without_creation_from_params(association_id, options, &extension)
     end
 
