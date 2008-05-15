@@ -13,6 +13,14 @@ These multi-model forms require a complex interaction between Javascript, models
 
   script/plugin install git://github.com/zilkey/atomic_saves.git
 
+== Checklist
+
+* Add <tt>:single_save => true</tt> to the association
+* Create the partial for the subform
+* Add the javascript snippet to the top of the parent form
+* Add the empty hash at the top of the form
+* Add the div to the parent form
+
 == Common Scenarios
 
 Some of the most common scenarios I've come across are:
