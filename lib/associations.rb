@@ -63,6 +63,7 @@ module AssociationCreationFromParams
             end
           end
         else
+
           define_method("new_#{Inflector.singularize(association_id.to_s)}_attributes=") do |new_attributes|
             new_attributes.each do |id,attributes|
               send(association_id).build(attributes)
@@ -80,9 +81,6 @@ module AssociationCreationFromParams
             end
           end
 
-          define_method("#{association_id}_without_deleted") do
-            send(association_id).select{|t| t.marked_for_deletion == false}
-          end
         end
 
         name = options[:through] || association_id
@@ -106,8 +104,12 @@ module AssociationCreationFromParams
         end
         after_update save_method_for_association
 
+        define_method("#{name}_without_deleted") do
+          send(name).select{|t| t.marked_for_deletion == false}
+        end
+
       end
-            
+
       has_many_without_creation_from_params(association_id, options, &extension)
     end
 
