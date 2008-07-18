@@ -10,8 +10,8 @@ A common design pattern is to have a form that handles multiple models, in any o
 These multi-model forms require a complex interaction between Javascript, models, views and controllers.  Due to the complexity and the variety of scenarios one plugin can never totally abstract this process.  This plugin serves to help keep your models dry in a few of the most common scenarios.
 
 == Installation
-
-  script/plugin install git://github.com/zilkey/atomic_saves.git
+  Original
+  script/plugin install git://github.com/zilkey/atomic_save.git
 
 == Checklist
 
